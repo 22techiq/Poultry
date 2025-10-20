@@ -24,6 +24,37 @@
     .modal-backdrop { background: rgba(0,0,0,0.5); }
   </style>
 </head>
+<!--Prev... clickjacking-->
+<script>
+  if (window.top !== window.self) {
+    window.top.location = window.self.location;
+  }
+</script>
+  <!--Force HTTPS Redirect-->
+  <script>
+  if (location.protocol !== 'https:') {
+    location.replace(`https://${location.hostname}${location.pathname}${location.search}`);
+  }
+  </script>
+  <!--Disable Console Access-->
+  <script>
+  // Disable right-click
+  document.addEventListener('contextmenu', e => e.preventDefault());
+
+  // Disable text selection
+  document.addEventListener('selectstart', e => e.preventDefault());
+
+  // Disable copy shortcut (Ctrl + C or ⌘ + C)
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+      e.preventDefault();
+      alert("⚠️ Copying content is disabled.");
+    }
+  });
+  </script>
+  
+
+  
 <body class="antialiased bg-gray-50 text-gray-800">
   <!-- NAVBAR -->
   <header class="bg-white shadow-sm sticky top-0 z-40">
