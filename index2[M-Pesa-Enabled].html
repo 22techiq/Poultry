@@ -476,61 +476,145 @@
     });
 
     // Checkout submit -> POST to Google Apps Script
-    document.getElementById('checkout-form').addEventListener('submit', async function(e){
-      e.preventDefault();
-      const cart = loadCart();
-      if(Object.keys(cart).length === 0) return alert('Cart empty.');
-      const items = Object.entries(cart).map(([id,q]) => ({ id, title: CATALOG[id].title, price: CATALOG[id].price, qty: q }));
-      const total = cartTotal(cart);
-      const payload = {
-        orderId: 'ORD-' + Date.now().toString(36).toUpperCase(),
-        createdAt: new Date().toISOString(),
-        customer: {
-          name: document.getElementById('cust-name').value,
-          email: document.getElementById('cust-email').value,
-          phone: document.getElementById('cust-phone').value,
-          address: document.getElementById('cust-address').value
-        },
-        items,
-        total
-      };
+// ===============================
+// INTASEND STK PAYMENT INTEGRATION
+// ===============================
 
-      // Basic validation
-      if(!payload.customer.name || !payload.customer.email) {
-        return alert('Please provide name and email.');
-      }
+document.getElementById('checkout-form').addEventListener('submit', async function(e){
+  e.preventDefault();
 
-      // show loading
-      const btn = e.submitter;
-      const oldText = btn.innerText;
-      btn.disabled = true;
-      btn.innerText = 'Placing order...';
+  const cart = loadCart();
+  if(Object.keys(cart).length === 0){
+    return alert('Cart empty.');
+  }
 
-      try {
-        const res = await fetch(GSHEET_WEB_APP_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const text = await res.text(); // Apps Script returns text
-        if(res.ok) {
-          alert('Order placed! Order ID: ' + payload.orderId + '\nWe will contact you soon.\nResponse: ' + text);
-          // clear cart & close modals
-          localStorage.removeItem(CART_KEY);
-          updateCartUI();
-          toggleCheckout(false);
-          toggleCart(false);
-        } else {
-          alert('Failed to place order. Server said: ' + text);
-        }
-      } catch (err) {
-        console.error(err);
-        alert('Network error while placing order: ' + err.message);
-      } finally {
-        btn.disabled = false;
-        btn.innerText = oldText;
-      }
+  const items = Object.entries(cart).map(([id,q]) => ({
+    id,
+    title: CATALOG[id].title,
+    price: CATALOG[id].price,
+    qty: q
+  }));
+
+  const total = cartTotal(cart);
+  const orderId = 'ORD-' + Date.now().toString(36).toUpperCase();
+
+  const payload = {
+    orderId: orderId,
+    name: document.getElementById('cust-name').value,
+    email: document.getElementById('cust-email').value,
+    phone: document.getElementById('cust-phone').value,
+    address: document.getElementById('cust-address').value,
+    items: items,
+    amount: total
+  };
+
+  if(!payload.name || !payload.email || !payload.phone){
+    return alert('Name, Email and Phone required.');
+  }
+
+  const btn = e.submitter;
+  const originalText = btn.innerText;
+
+  btn.disabled = true;
+  btn.innerText = "Sending STK...";
+
+  try {
+
+    // 🔹 Initiate STK Push
+    const res = await fetch(GSHEET_WEB_APP_URL,{
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({
+        action:"initiatePayment",
+        data: payload
+      })
     });
+
+    const result = await res.json();
+
+    if(!result.success){
+      throw new Error(result.message || "Payment initiation failed");
+    }
+
+    btn.innerText = "Check phone & enter PIN...";
+
+    startPolling(orderId, btn, originalText);
+
+  } catch(err){
+    alert("Payment Error: " + err.message);
+    btn.disabled = false;
+    btn.innerText = originalText;
+  }
+});
+
+
+// ===============================
+// PAYMENT STATUS POLLING
+// ===============================
+function startPolling(orderId, btn, originalText){
+
+  let attempts = 0;
+  const maxAttempts = 25;
+
+  const interval = setInterval(async ()=>{
+
+    attempts++;
+
+    try {
+
+      const res = await fetch(GSHEET_WEB_APP_URL,{
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          action:"checkStatus",
+          orderId: orderId
+        })
+      });
+
+      const data = await res.json();
+
+      if(data.status === "SUCCESS"){
+
+        clearInterval(interval);
+
+        alert("✅ Payment Successful!");
+
+        localStorage.removeItem(CART_KEY);
+        updateCartUI();
+
+        toggleCheckout(false);
+        toggleCart(false);
+
+        btn.disabled = false;
+        btn.innerText = originalText;
+      }
+
+      if(data.status === "FAILED"){
+
+        clearInterval(interval);
+
+        alert("❌ Payment Failed or Cancelled.");
+
+        btn.disabled = false;
+        btn.innerText = originalText;
+      }
+
+      if(attempts >= maxAttempts){
+        clearInterval(interval);
+        alert("⏳ Payment timeout. Confirm payment on phone.");
+        btn.disabled = false;
+        btn.innerText = originalText;
+      }
+
+    } catch(err){
+      clearInterval(interval);
+      alert("Status check error.");
+      btn.disabled = false;
+      btn.innerText = originalText;
+    }
+
+  }, 4000);
+}
 
     // ---------- Mobile menu ----------
     document.getElementById('nav-toggle').addEventListener('click', function(){
